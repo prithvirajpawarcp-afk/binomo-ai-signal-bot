@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AI Signal Bot V1 — Live OHLC</title>
+<style>
+:root{--bg:#06100c;--card:#0c1b14;--line:#1d3d2d;--text:#edfff4;--muted:#8faf9d;--green:#25ef88;--red:#ff5968;--yellow:#ffd166}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#04100a,#0a1912 60%,#05100b);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}.wrap{max-width:900px;margin:auto;padding:16px}
+.top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:14px}h1{font-size:21px;margin:0}.tag{font-size:11px;border:1px solid var(--line);padding:5px 8px;border-radius:20px;color:var(--muted)}
+.card{background:#0c1b14f5;border:1px solid var(--line);border-radius:18px;padding:15px;margin:12px 0;box-shadow:0 8px 28px #0005}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.full{grid-column:1/-1}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}input,select,button{width:100%;border-radius:12px;border:1px solid #28543d;background:#07120d;color:var(--text);padding:11px;font:inherit}button{cursor:pointer;font-weight:800;background:#123c28;border-color:#2b8057}button:hover{filter:brightness(1.15)}
+.note{font-size:11px;color:var(--muted);line-height:1.5;margin-top:9px}.signal{text-align:center;padding:20px;border-radius:16px;border:1px solid var(--line);margin-top:10px}.signal .big{font-size:38px;font-weight:900}.buy{color:var(--green)}.sell{color:var(--red)}.none{color:var(--yellow)}
+.scores{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.score{padding:13px;background:#07120d;border-radius:14px;border:1px solid var(--line);text-align:center}.score b{font-size:25px}
+table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:8px 5px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--muted)}.history{overflow:auto}.ok{color:var(--green)}.bad{color:var(--red)}.neutral{color:var(--yellow)}.status{font-size:12px;padding:9px;border-radius:10px;background:#07120d;color:var(--muted);margin-top:10px}.hide{display:none}@media(max-width:620px){.grid{grid-template-columns:1fr}.full{grid-column:auto}.top{align-items:flex-start}.signal .big{font-size:32px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><div><h1>⚡ AI Multi-Indicator Signal Bot</h1><div class="note">V1 • real OHLC mode • 11-indicator weighted engine</div></div><div class="tag">NO RANDOM DATA</div></div>
+
+<div class="card">
+<div class="grid">
+<div class="full"><label>Twelve Data API Key</label><input id="key" type="password" placeholder="Paste your Twelve Data API key"></div>
+<div><label>Symbol</label><input id="symbol" value="EUR/USD"></div>
+<div><label>Timeframe</label><select id="tf"><option value="1min">1 Minute</option><option value="5min">5 Minutes</option><option value="15min">15 Minutes</option></select></div>
+<div><button onclick="getLive()">GET REAL SIGNAL</button></div>
+<div><button onclick="loadHistory()">REFRESH HISTORY</button></div>
+</div>
+<div class="note">Your key is sent only with the request to this backend and is not displayed in results. For production, use HTTPS and preferably keep provider keys server-side. The engine uses completed candles and does not create synthetic candles.</div>
+<div id="status" class="status">Ready. Enter your API key and request a signal.</div>
+</div>
+
+<div class="card">
+<div class="signal" id="signalBox"><div class="big none">NO SIGNAL</div><div class="note">No live analysis yet.</div></div>
+<div class="scores"><div class="score"><div class="note">BUY SCORE</div><b id="buy">—</b></div><div class="score"><div class="note">SELL SCORE</div><b id="sell">—</b></div></div>
+<div class="scores"><div class="score"><div class="note">AGREEMENT</div><b id="agree">—</b></div><div class="score"><div class="note">SCORE SHARE</div><b id="conf">—</b></div></div>
+<div class="note" id="candleInfo"></div>
+</div>
+
+<div class="card"><h3>11-indicator breakdown</h3><div class="history"><table><thead><tr><th>Indicator</th><th>Dir</th><th>Weight</th><th>Value</th></tr></thead><tbody id="indicators"></tbody></table></div></div>
+
+<div class="card"><h3>Signal history</h3><div class="history"><table><thead><tr><th>Time</th><th>Symbol</th><th>Signal</th><th>Buy</th><th>Sell</th></tr></thead><tbody id="history"></tbody></table></div><button style="margin-top:10px" onclick="clearHistory()">CLEAR HISTORY</button></div>
+
+<div class="card"><div class="note"><b>Data warning:</b> A Twelve Data EUR/USD feed is a real market-data feed, but it is not a guarantee that its prices equal a broker's proprietary OTC price. This dashboard therefore reports the provider and completed-candle timestamp rather than claiming a Binomo OTC feed.</div></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+function base(){return location.origin}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function dir(d){return d===1?'<span class="ok">BUY</span>':d===-1?'<span class="bad">SELL</span>':'<span class="neutral">NEUTRAL</span>'}
+function fmt(v){if(v===null||v===undefined)return '—';if(typeof v==='object')return esc(JSON.stringify(v));return typeof v==='number'?Number(v).toFixed(6):esc(v)}
+function status(t,bad=false){$('status').innerHTML=esc(t);$('status').style.color=bad?'var(--red)':'var(--muted)'}
+function show(r){
+ const cls=r.signal==='BUY'?'buy':r.signal==='SELL'?'sell':'none';
+ $('signalBox').innerHTML=`<div class="big ${cls}">${r.signal}</div><div class="note">Provider: ${esc(r.data_provider||'external')} • completed candle: ${esc(r.latest_completed_candle||'—')}</div>`;
+ $('buy').textContent=r.buy_score;$('sell').textContent=r.sell_score;$('agree').textContent=`${r.agreement_count}/${r.indicator_count}`;$('conf').textContent=r.confidence+'%';
+ $('candleInfo').textContent=`${r.candles_used||'—'} completed candles analyzed • price ${r.price}`;
+ $('indicators').innerHTML=r.indicators.map(x=>`<tr><td>${esc(x.name)}</td><td>${dir(x.direction)}</td><td>${x.weight}</td><td>${fmt(x.value)}<br><span class="note">${esc(x.detail)}</span></td></tr>`).join('');
+}
+async function getLive(){
+ const key=$('key').value.trim(); if(!key){alert('Enter your Twelve Data API key.');return}
+ status('Fetching real OHLC candles and calculating indicators...');
+ try{
+  const res=await fetch(base()+'/api/live-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:key,symbol:$('symbol').value.trim()||'EUR/USD',interval:$('tf').value,outputsize:120})});
+  const data=await res.json();if(!res.ok)throw new Error(data.detail||'Live-data error');show(data);status('Live analysis completed from completed OHLC candles.');loadHistory();
+ }catch(e){status(e.message,true);alert(e.message)}
+}
+async function loadHistory(){
+ try{const r=await fetch(base()+'/api/history?limit=30');const d=await r.json();$('history').innerHTML=d.items.map(x=>`<tr><td>${esc(new Date(x.timestamp).toLocaleString())}</td><td>${esc(x.symbol)}</td><td class="${x.signal==='BUY'?'ok':x.signal==='SELL'?'bad':'neutral'}">${x.signal}</td><td>${x.buy_score}</td><td>${x.sell_score}</td></tr>`).join('')}catch(e){}
+}
+async function clearHistory(){await fetch(base()+'/api/history',{method:'DELETE'});loadHistory()}
+loadHistory();
+</script>
+</body>
+</html>
